@@ -3,8 +3,6 @@ import Capacitor
 
 @testable import Plugin
 
-// TODO: beforeeach? Reset state
-
 class PluginTests: XCTestCase {
     
     func testSet() {
@@ -59,26 +57,6 @@ class PluginTests: XCTestCase {
         plugin.get(call!)
     }
     
-//    func testGet() {
-//        let key = "key"
-//        let value = "Hello, World!"
-//        let keychainwrapper = setupDedicatedWrapper()
-//        keychainwrapper.set(value, forKey: key)
-//
-//        let plugin = SecureStoragePlugin()
-//
-//        let call = CAPPluginCall(callbackId: "test", options: [
-//            "key": key
-//            ], success: { (result, call) in
-//                let resultValue = result!.data?["value"] as? String
-//                XCTAssertEqual(value, resultValue)
-//        }, error: { (err) in
-//            XCTFail("Error shouldn't have been called")
-//        })
-//
-//        plugin.get(call!)
-//    }
-    
     func testNonExistingGet() {
         let key = "keyNonExisting"
         let plugin = SecureStoragePlugin()
@@ -118,31 +96,30 @@ class PluginTests: XCTestCase {
 
         plugin.remove(call!)
     }
-//    
-//    func testRemove() {
-//        let key = "key"
-//
-//        let plugin = SecureStoragePlugin()
-//
-//        let call = CAPPluginCall(
-//            callbackId: "test",
-//            options: [
-//                "key": key,
-//                "prompt": "lorem ipsum"
-//            ],
-//            success: { (result, call) in
-//                let resultValue = result!.data?["value"] as? Bool
-//                XCTAssertTrue(resultValue ?? false)
-//            },
-//            error: { (err) in
-//                let errorString: String? = err?.message
-//                print(errorString ?? "Unknown error")
-//                XCTFail("Error shouldn't have been called")
-//            }
-//        );
-//
-//        plugin.remove(call!)
-//    }
+
+    func testRemove() {
+        let key = "key"
+
+        let plugin = SecureStoragePlugin()
+
+        let call = CAPPluginCall(
+            callbackId: "test",
+            options: [
+                "key": key,
+            ],
+            success: { (result, call) in
+                let resultValue = result!.data?["value"] as? Bool
+                XCTAssertTrue(resultValue ?? false)
+            },
+            error: { (err) in
+                let errorString: String? = err?.message
+                print(errorString ?? "Unknown error")
+                XCTFail("Error shouldn't have been called")
+            }
+        );
+
+        plugin.remove(call!)
+    }
     
     func testGetPlatform() {
         let plugin = SecureStoragePlugin()
