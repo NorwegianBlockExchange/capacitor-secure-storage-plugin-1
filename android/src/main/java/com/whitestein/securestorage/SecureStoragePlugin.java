@@ -1,6 +1,9 @@
 package com.whitestein.securestorage;
 
+import android.app.Activity;
 import android.content.Context;
+
+import androidx.fragment.app.FragmentActivity;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -85,7 +88,8 @@ public class SecureStoragePlugin extends Plugin {
     }
 
     public JSObject _get(String key) throws Exception {
-        byte[] buffer = this.passwordStorageHelper.getData(key);
+        FragmentActivity a = getActivity();
+        byte[] buffer = this.passwordStorageHelper.getData(key, a);
         if (buffer != null && buffer.length > 0) {
             String value = new String(buffer, Charset.forName("UTF-8"));
             JSObject ret = new JSObject();

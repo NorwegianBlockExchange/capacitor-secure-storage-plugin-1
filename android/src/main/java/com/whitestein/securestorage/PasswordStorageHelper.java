@@ -1,9 +1,12 @@
 package com.whitestein.securestorage;
 
+import static androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG;
+
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
+import android.os.Build;
 import android.security.KeyChain;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyInfo;
@@ -11,10 +14,12 @@ import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+import androidx.biometric.BiometricPrompt;
+import androidx.fragment.app.FragmentActivity;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.math.BigInteger;
-import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.KeyFactory;
 import java.security.KeyPairGenerator;
@@ -29,15 +34,14 @@ import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.InvalidKeySpecException;
-import java.util.Calendar;
-import java.util.GregorianCalendar;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
-import javax.security.auth.x500.X500Principal;
 
 
 public class PasswordStorageHelper {
@@ -45,38 +49,32 @@ public class PasswordStorageHelper {
     private static final String LOG_TAG = PasswordStorageHelper.class.getSimpleName();
     private static final String PREFERENCES_FILE = "cap_sec";
 
-    private PasswordStorageImpl passwordStorage = null;
+    private final PasswordStorage passwordStorage = new PasswordStorageHelper_SDK18();
+
+    private final Context context;
 
     public PasswordStorageHelper(Context context) {
-        if (android.os.Build.VERSION.SDK_INT < 18) {
-            passwordStorage = new PasswordStorageHelper_SDK16();
-        } else {
-            passwordStorage = new PasswordStorageHelper_SDK18();
-        }
-
-        boolean isInitialized = false;
-
+        this.context = context;
         try {
-            isInitialized = passwordStorage.init(context);
+            passwordStorage.init(context);
         } catch (Exception ex) {
             Log.e(LOG_TAG, "PasswordStorage initialisation error:" + ex.getMessage(), ex);
+            throw new RuntimeException(ex);
         }
 
-        if (!isInitialized && passwordStorage instanceof PasswordStorageHelper_SDK18) {
-            passwordStorage = new PasswordStorageHelper_SDK16();
-            passwordStorage.init(context);
-        }
     }
 
     public void setData(String key, byte[] data) {
         passwordStorage.setData(key, data);
     }
 
-    public byte[] getData(String key) {
-        return passwordStorage.getData(key);
+    public byte[] getData(String key, FragmentActivity activity) {
+        return passwordStorage.getData(key, activity);
     }
 
-    public String[] keys() { return passwordStorage.keys(); }
+    public String[] keys() {
+        return passwordStorage.keys();
+    }
 
     public void remove(String key) {
         passwordStorage.remove(key);
@@ -86,12 +84,12 @@ public class PasswordStorageHelper {
         passwordStorage.clear();
     }
 
-    private interface PasswordStorageImpl {
+    private interface PasswordStorage {
         boolean init(Context context);
 
         void setData(String key, byte[] data);
 
-        byte[] getData(String key);
+        byte[] getData(String key, FragmentActivity activity);
 
         String[] keys();
 
@@ -100,54 +98,7 @@ public class PasswordStorageHelper {
         void clear();
     }
 
-    private static class PasswordStorageHelper_SDK16 implements PasswordStorageImpl {
-        private SharedPreferences preferences;
-
-        @Override
-        public boolean init(Context context) {
-            preferences = context.getSharedPreferences(PREFERENCES_FILE, Context.MODE_PRIVATE);
-            return true;
-        }
-
-        @Override
-        public void setData(String key, byte[] data) {
-            if (data == null)
-                return;
-            Editor editor = preferences.edit();
-            editor.putString(key, Base64.encodeToString(data, Base64.DEFAULT));
-            editor.commit();
-        }
-
-        @Override
-        public byte[] getData(String key) {
-            String res = preferences.getString(key, null);
-            if (res == null)
-                return null;
-            return Base64.decode(res, Base64.DEFAULT);
-        }
-
-        @Override
-        public String[] keys() {
-            Set<String> keySet = preferences.getAll().keySet();
-            return keySet.toArray(new String[keySet.size()]);
-        }
-
-        @Override
-        public void remove(String key) {
-            Editor editor = preferences.edit();
-            editor.remove(key);
-            editor.commit();
-        }
-
-        @Override
-        public void clear() {
-            Editor editor = preferences.edit();
-            editor.clear();
-            editor.commit();
-        }
-    }
-
-    private static class PasswordStorageHelper_SDK18 implements PasswordStorageImpl {
+    private static class PasswordStorageHelper_SDK18 implements PasswordStorage {
 
         private static final String KEY_ALGORITHM_RSA = "RSA";
 
@@ -185,28 +136,16 @@ public class PasswordStorageHelper {
                 return false;
             }
 
-            // Create a start and end time, for the validity range of the key pair that's about to be
-            // generated.
-            Calendar start = new GregorianCalendar();
-            Calendar end = new GregorianCalendar();
-            end.add(Calendar.YEAR, 10);
-
-            // Specify the parameters object which will be passed to KeyPairGenerator
             AlgorithmParameterSpec spec;
-            if (android.os.Build.VERSION.SDK_INT < 23) {
-                spec = new android.security.KeyPairGeneratorSpec.Builder(context)
-                        // Alias - is a key for your KeyPair, to obtain it from Keystore in future.
-                        .setAlias(alias)
-                        // The subject used for the self-signed certificate of the generated pair
-                        .setSubject(new X500Principal("CN=" + alias))
-                        // The serial number used for the self-signed certificate of the generated pair.
-                        .setSerialNumber(BigInteger.valueOf(1337))
-                        // Date range of validity for the generated pair.
-                        .setStartDate(start.getTime()).setEndDate(end.getTime())
-                        .build();
+            if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                // only support devices with Android P or higher
+                throw new IllegalStateException();
             } else {
                 spec = new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_DECRYPT)
                         .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
+                        .setUserAuthenticationRequired(true)
+                        .setUserAuthenticationValidityDurationSeconds(300)
+                        .setUnlockedDeviceRequired(true)
                         .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_PKCS1)
                         .build();
             }
@@ -217,26 +156,21 @@ public class PasswordStorageHelper {
             try {
                 kpGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM_RSA, KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
                 kpGenerator.initialize(spec);
-                // Generate private/public keys
                 kpGenerator.generateKeyPair();
-            } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException | NoSuchProviderException e) {
-                e.printStackTrace();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
 
             // Check if device support Hardware-backed keystore
             try {
-                boolean isHardwareBackedKeystoreSupported;
-                if (android.os.Build.VERSION.SDK_INT < 23) {
-                    isHardwareBackedKeystoreSupported = KeyChain.isBoundKeyAlgorithm(KeyProperties.KEY_ALGORITHM_RSA);
-                } else {
-                    PrivateKey privateKey = (PrivateKey) ks.getKey(alias, null);
-                    KeyChain.isBoundKeyAlgorithm(KeyProperties.KEY_ALGORITHM_RSA);
-                    KeyFactory keyFactory = KeyFactory.getInstance(privateKey.getAlgorithm(), "AndroidKeyStore");
-                    KeyInfo keyInfo = keyFactory.getKeySpec(privateKey, KeyInfo.class);
-                    isHardwareBackedKeystoreSupported = keyInfo.isInsideSecureHardware();
-                }
+                PrivateKey privateKey = (PrivateKey) ks.getKey(alias, null);
+                KeyChain.isBoundKeyAlgorithm(KeyProperties.KEY_ALGORITHM_RSA);
+                KeyFactory keyFactory = KeyFactory.getInstance(privateKey.getAlgorithm(), KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
+                KeyInfo keyInfo = keyFactory.getKeySpec(privateKey, KeyInfo.class);
+                boolean isHardwareBackedKeystoreSupported = keyInfo.isInsideSecureHardware();
                 Log.d(LOG_TAG, "Hardware-Backed Keystore Supported: " + isHardwareBackedKeystoreSupported);
             } catch (KeyStoreException | NoSuchAlgorithmException | UnrecoverableKeyException | InvalidKeySpecException | NoSuchProviderException e) {
+                return false;
             }
 
             return true;
@@ -244,9 +178,8 @@ public class PasswordStorageHelper {
 
         @Override
         public void setData(String key, byte[] data) {
-            KeyStore ks = null;
             try {
-                ks = KeyStore.getInstance(KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
+                KeyStore ks = KeyStore.getInstance(KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
 
                 ks.load(null);
                 if (ks.getCertificate(alias) == null) return;
@@ -255,7 +188,7 @@ public class PasswordStorageHelper {
 
                 if (publicKey == null) {
                     Log.d(LOG_TAG, "Error: Public key was not found in Keystore");
-                    return;
+                    throw new RuntimeException("Error: Public key was not found in Keystore");
                 }
 
                 String value = encrypt(publicKey, data);
@@ -266,24 +199,23 @@ public class PasswordStorageHelper {
             } catch (NoSuchAlgorithmException | InvalidKeyException | NoSuchPaddingException
                     | IllegalBlockSizeException | BadPaddingException | NoSuchProviderException
                     | InvalidKeySpecException | KeyStoreException | CertificateException | IOException e) {
-                e.printStackTrace();
+                throw new RuntimeException(e);
             }
         }
 
         @Override
-        public byte[] getData(String key) {
+        public byte[] getData(String key, FragmentActivity activity) {
             KeyStore ks = null;
             try {
                 ks = KeyStore.getInstance(KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
                 ks.load(null);
                 PrivateKey privateKey = (PrivateKey) ks.getKey(alias, null);
-                return decrypt(privateKey, preferences.getString(key, null));
+                return decrypt(privateKey, preferences.getString(key, null), activity);
             } catch (KeyStoreException | NoSuchAlgorithmException | CertificateException | IOException
                     | UnrecoverableEntryException | InvalidKeyException | NoSuchPaddingException
                     | IllegalBlockSizeException | BadPaddingException | NoSuchProviderException e) {
-               e.printStackTrace();
+                throw new RuntimeException(e);
             }
-            return null;
         }
 
         @Override
@@ -306,7 +238,7 @@ public class PasswordStorageHelper {
             editor.commit();
         }
 
-        private static int KEY_LENGTH = 2048;
+        private static final int KEY_LENGTH = 2048;
 
         @SuppressLint("TrulyRandom")
         private static String encrypt(PublicKey encryptionKey, byte[] data) throws NoSuchAlgorithmException,
@@ -331,7 +263,7 @@ public class PasswordStorageHelper {
                     try {
                         byteArrayOutputStream.write(tmpData);
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        throw new RuntimeException(e);
                     }
                     position += limit;
                 }
@@ -340,37 +272,69 @@ public class PasswordStorageHelper {
             }
         }
 
-        private static byte[] decrypt(PrivateKey decryptionKey, String encryptedData) throws NoSuchAlgorithmException,
+
+        //TODO only show biometric prompt when the key requires it rather than everytime
+        private static byte[] decrypt(PrivateKey decryptionKey, String encryptedData, FragmentActivity activity) throws NoSuchAlgorithmException,
                 NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException,
                 NoSuchProviderException {
-            if (encryptedData == null)
-                return null;
-            byte[] encryptedBuffer = Base64.decode(encryptedData, Base64.DEFAULT);
 
-            if (encryptedBuffer.length <= KEY_LENGTH / 8) {
+            CompletableFuture<byte[]> future = new CompletableFuture<>();
+
+            try {
+                if (encryptedData == null)
+                    return null;
+                byte[] encryptedBuffer = Base64.decode(encryptedData, Base64.DEFAULT);
+
                 Cipher cipher = Cipher.getInstance(RSA_ECB_PKCS1_PADDING);
                 cipher.init(Cipher.DECRYPT_MODE, decryptionKey);
-                return cipher.doFinal(encryptedBuffer);
-            } else {
-                Cipher cipher = Cipher.getInstance(RSA_ECB_PKCS1_PADDING);
-                cipher.init(Cipher.DECRYPT_MODE, decryptionKey);
-                int limit = KEY_LENGTH / 8;
-                int position = 0;
-                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                while (position < encryptedBuffer.length) {
-                    if (encryptedBuffer.length - position < limit)
-                        limit = encryptedBuffer.length - position;
-                    byte[] tmpData = cipher.doFinal(encryptedBuffer, position, limit);
-                    try {
-                        byteArrayOutputStream.write(tmpData);
-                    } catch (IOException e) {
-                        e.printStackTrace();
+
+                BiometricPrompt.PromptInfo promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Biometric Auth")
+                        .setSubtitle("Log in using your biometric credential")
+                        .setAllowedAuthenticators(BIOMETRIC_STRONG)
+                        .build();
+
+                BiometricPrompt prompt = new BiometricPrompt(activity, Executors.newSingleThreadExecutor(), new BiometricPrompt.AuthenticationCallback() {
+                    @Override
+                    public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                        future.completeExceptionally(new RuntimeException(errString.toString()));
                     }
-                    position += limit;
-                }
 
-                return byteArrayOutputStream.toByteArray();
+                    @Override
+                    public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                        try {
+                            if (encryptedBuffer.length <= KEY_LENGTH / 8) {
+                                future.complete(cipher.doFinal(encryptedBuffer));
+                            } else {
+                                int limit = KEY_LENGTH / 8;
+                                int position = 0;
+                                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                                while (position < encryptedBuffer.length) {
+                                    if (encryptedBuffer.length - position < limit)
+                                        limit = encryptedBuffer.length - position;
+                                    byte[] tmpData = cipher.doFinal(encryptedBuffer, position, limit);
+                                    byteArrayOutputStream.write(tmpData);
+                                    position += limit;
+                                }
+                                future.complete(byteArrayOutputStream.toByteArray());
+                            }
+                        } catch (Exception e) {
+                            future.completeExceptionally(e);
+                        }
+                    }
+
+                    @Override
+                    public void onAuthenticationFailed() {
+                        future.completeExceptionally(new RuntimeException("failed to authenticate using biometric auth"));
+                    }
+                });
+                prompt.authenticate(promptInfo, new BiometricPrompt.CryptoObject(cipher));
+                return future.join();
+            } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException e) {
+                throw new RuntimeException(e);
             }
+
+
         }
     }
 }
