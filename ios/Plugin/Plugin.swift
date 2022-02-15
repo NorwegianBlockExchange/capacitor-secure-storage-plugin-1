@@ -9,6 +9,22 @@ import LocalAuthentication
 @objc(SecureStoragePlugin)
 public class SecureStoragePlugin: CAPPlugin {
     
+    private func fail(call: CAPPluginCall, template: String, status: OSStatus? = nil) {
+        if (status != nil) { call.reject(String(format: template, status!)) }
+        else { call.reject(template) }
+    }
+    
+    private func removeFromKeychain(key: String) -> OSStatus {
+        // Create a query dict for deleting our keychain item
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key
+        ]
+        
+        // execute the query, return the status
+        return SecItemDelete(query as CFDictionary)
+    }
+    
     private func getBiometricAccessControl() -> SecAccessControl {
         var accessControl: SecAccessControl?
         var error: Unmanaged<CFError>?
@@ -23,34 +39,46 @@ public class SecureStoragePlugin: CAPPlugin {
         precondition(accessControl != nil, "SecAccessControlCreateWithFlags failed")
         return accessControl!
     }
-    
-    // TODO: find existing items and overwrite them
-    
+
     @objc func set(_ call: CAPPluginCall) {
         let key = call.getString("key") ?? ""
         let value = call.getString("value") ?? ""
         let encoded = value.data(using: String.Encoding.utf8)!
         
-        print(key, value)
+        print(String(format: "Secure-Storage: storing key %@ with value %@", key, value))
+        
         let accessControl = getBiometricAccessControl()
         
-        let context = LAContext()
-        context.touchIDAuthenticationAllowableReuseDuration = 300 // biometric lifetime of 5 mim
+//        let context = LAContext()
+//        context.touchIDAuthenticationAllowableReuseDuration = 300 // biometric lifetime of 5 mim
 
         // Create a query dict for executing the add to keychain
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
-//            kSecAttrAccessControl as String: accessControl,
-            kSecUseAuthenticationContext as String: context,
+            kSecAttrAccessControl as String: accessControl,
+//            kSecUseAuthenticationContext as String: context,
             kSecValueData as String: encoded
         ]
         
         // Execute the query & catch errors
-        let status = SecItemAdd(query as CFDictionary, nil)
+        var status = SecItemAdd(query as CFDictionary, nil)
+        
+        // If item already exists, remove & set new value
+        if (status == errSecDuplicateItem) {
+            print("errSecDuplicateItem")
+            let deleteStatus = removeFromKeychain(key: key)
+            
+            guard deleteStatus == errSecSuccess else {
+                fail(call: call, template: "Failed to set value securely, error code: %d", status: deleteStatus)
+                return
+            }
+            
+            status = SecItemAdd(query as CFDictionary, nil)
+        }
+        
         guard status == errSecSuccess else {
-            let template = "Failed to save value securely, error code: %d"
-            call.reject(String(format: template, status))
+            fail(call: call, template: "Failed to set value securely, error code: %d", status: status)
             return
         }
         
@@ -60,6 +88,8 @@ public class SecureStoragePlugin: CAPPlugin {
     @objc func get(_ call: CAPPluginCall) {
         let key = call.getString("key") ?? ""
         let prompt = call.getString("prompt") ?? ""
+        
+        print(String(format: "Secure-Storage: getting key %@", key))
         
         // Create a query dict for fetching our keychain item, including biometric prompt
         let query: [String: Any] = [
@@ -75,8 +105,7 @@ public class SecureStoragePlugin: CAPPlugin {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess else {
-            let template = "Failed to get value securely, error code: %d"
-            call.reject(String(format: template, status))
+            fail(call: call, template: "Failed to get value securely, error code: %d", status: status)
             return
         }
         
@@ -86,7 +115,7 @@ public class SecureStoragePlugin: CAPPlugin {
             let secretData = resultData[kSecValueData as String] as? Data,
             let secret = String(data: secretData, encoding: String.Encoding.utf8)
         else {
-            call.reject("Failed to parse stored value")
+            fail(call: call, template: "Failed to parse stored value")
             return
         }
         
@@ -98,16 +127,13 @@ public class SecureStoragePlugin: CAPPlugin {
     @objc func remove(_ call: CAPPluginCall) {
         let key = call.getString("key") ?? ""
         
-        // Create a query dict for deleting our keychain item
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key
-        ]
-        
-        // Execute query, catch errors
-        let status = SecItemDelete(query as CFDictionary)
-        
-        guard status == errSecSuccess else { call.reject("error"); return }
+        print(String(format: "Secure-Storage: removing key %@", key))
+    
+        let status = removeFromKeychain(key: key)
+        guard status == errSecSuccess else {
+            fail(call: call, template: "Failed to remove value securely, error code %d", status: status)
+            return
+        }
         
         call.resolve(["value": true])
     }
