@@ -33,7 +33,7 @@ public class SecureStoragePlugin: CAPPlugin {
         accessControl = SecAccessControlCreateWithFlags(
             nil,
             kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, // requires device to have passcode, becomes inaccessible if passcode removed
-            .biometryCurrentSet, // requires biometric auth, is invalidated if the user's biometry changes (re-enrol faceID, remove/add fingers to TouchID)
+            .userPresence, // requires biometric auth, but falls-back to passcode if needed
             &error)
         
         precondition(accessControl != nil, "SecAccessControlCreateWithFlags failed")
