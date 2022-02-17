@@ -1,7 +1,7 @@
 {
 
   "name": "@nbx/capacitor-secure-storage-plugin",
-  "version": "1.0.2",
+  "version": "1.0.3",
 
   "description": "Securely store secrets such as usernames, passwords, tokens, certificates or other sensitive information (strings) on iOS & Android",
   "main": "dist/esm/index.js",
@@ -29,7 +29,7 @@
     "dist/",
     "ios/",
     "android/",
-    "CapacitorSecureStoragePlugin.podspec"
+    "NbxCapacitorSecureStoragePlugin.podspec"
   ],
   "keywords": [
     "capacitor",
