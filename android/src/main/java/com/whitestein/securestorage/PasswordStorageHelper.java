@@ -1,7 +1,5 @@
 package com.whitestein.securestorage;
 
-import static androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG;
-
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -37,6 +35,7 @@ import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.InvalidKeySpecException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -53,7 +52,7 @@ public class PasswordStorageHelper {
     private static final String LOG_TAG = PasswordStorageHelper.class.getSimpleName();
     private static final String PREFERENCES_FILE = "cap_sec";
 
-    private final PasswordStorage passwordStorage = new PasswordStorageHelper_SDK18();
+    private final PasswordStorage passwordStorage = new PasswordStorageHelper_SDK28();
 
     private final Context context;
 
@@ -74,8 +73,8 @@ public class PasswordStorageHelper {
         passwordStorage.setData(key, data);
     }
 
-    public byte[] getData(String key, FragmentActivity activity) {
-        return passwordStorage.getData(key, activity);
+    public byte[] getData(String key, FragmentActivity activity, Optional<String> biometricPromptText) {
+        return passwordStorage.getData(key, activity, biometricPromptText);
     }
 
     public String[] keys() {
@@ -95,7 +94,7 @@ public class PasswordStorageHelper {
 
         void setData(String key, byte[] data);
 
-        byte[] getData(String key, FragmentActivity activity);
+        byte[] getData(String key, FragmentActivity activity, Optional<String> biometricPromptText);
 
         String[] keys();
 
@@ -104,6 +103,7 @@ public class PasswordStorageHelper {
         void clear();
     }
 
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
     private static class PasswordStorageHelper_SDK28 implements PasswordStorage {
 
         private static final String KEY_ALGORITHM_RSA = "RSA";
@@ -217,13 +217,13 @@ public class PasswordStorageHelper {
 
         @RequiresApi(api = Build.VERSION_CODES.P)
         @Override
-        public byte[] getData(String key, FragmentActivity activity) {
+        public byte[] getData(String key, FragmentActivity activity, Optional<String> biometricPromptText) {
             KeyStore ks = null;
             try {
                 ks = KeyStore.getInstance(KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
                 ks.load(null);
                 PrivateKey privateKey = (PrivateKey) ks.getKey(alias, null);
-                return decrypt(privateKey, preferences.getString(key, null), activity);
+                return decrypt(privateKey, preferences.getString(key, null), activity, biometricPromptText);
             } catch (KeyStoreException | NoSuchAlgorithmException | CertificateException | IOException
                     | UnrecoverableEntryException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
                 throw new RuntimeException(e);
@@ -295,14 +295,15 @@ public class PasswordStorageHelper {
                 return true;
             } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException e) {
                 throw new RuntimeException(e);
-            }finally {
+            } finally {
                 GLOBAL_BIOMETRICS_LOCK.unlock();
             }
             return false;
         }
 
+        @SuppressLint("ObsoleteSdkInt")
         @RequiresApi(api = Build.VERSION_CODES.P)
-        private static CompletableFuture<Boolean> displayBioMetrics(FragmentActivity activity) {
+        private static CompletableFuture<Boolean> displayBioMetrics(FragmentActivity activity, Optional<String> biometricPromptText) {
             CompletableFuture<Boolean> future = new CompletableFuture<>();
 
 
@@ -310,13 +311,13 @@ public class PasswordStorageHelper {
             if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                 promptInfo = new BiometricPrompt.PromptInfo.Builder()
                         .setTitle("Biometric Auth")
-                        .setSubtitle("Log in using your biometric credential")
+                        .setSubtitle(biometricPromptText.orElse("Log in using your biometric credential"))
                         .setDeviceCredentialAllowed(true)
                         .build();
             } else {
                 promptInfo = new BiometricPrompt.PromptInfo.Builder()
                         .setTitle("Biometric Auth")
-                        .setSubtitle("Log in using your biometric or device credential")
+                        .setSubtitle(biometricPromptText.orElse("Log in using your biometric credential"))
                         .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
                         .build();
             }
@@ -352,10 +353,10 @@ public class PasswordStorageHelper {
         }
 
         @RequiresApi(api = Build.VERSION_CODES.P)
-        private static byte[] decrypt(PrivateKey decryptionKey, String encryptedData, FragmentActivity activity) throws IllegalBlockSizeException, BadPaddingException, InvalidKeyException {
+        private static byte[] decrypt(PrivateKey decryptionKey, String encryptedData, FragmentActivity activity, Optional<String> biometricPromptText) throws IllegalBlockSizeException, BadPaddingException, InvalidKeyException {
 
             if (bioMetricsRequired(decryptionKey)) {
-                return displayBioMetrics(activity).thenApply(state -> {
+                return displayBioMetrics(activity, biometricPromptText).thenApply(state -> {
                     try {
                         return _decrypt(decryptionKey, encryptedData, activity);
                     } catch (InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
