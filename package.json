@@ -1,6 +1,8 @@
 {
-  "name": "capacitor-secure-storage-plugin",
-  "version": "0.7.0",
+
+  "name": "@nbx/capacitor-secure-storage-plugin",
+  "version": "1.0.0",
+
   "description": "Securely store secrets such as usernames, passwords, tokens, certificates or other sensitive information (strings) on iOS & Android",
   "main": "dist/esm/index.js",
   "types": "dist/esm/index.d.ts",
@@ -13,13 +15,14 @@
   "author": "martinkasa",
   "license": "MIT",
   "dependencies": {
-    "@capacitor/core": "^3.0.0"
+    "@capacitor/cli": "^3.4.1",
+    "@capacitor/core": "^3.4.1"
   },
   "devDependencies": {
+    "@capacitor/android": "^3.4.1",
+    "@capacitor/ios": "^3.4.1",
     "rimraf": "^3.0.0",
-    "typescript": "^3.2.4",
-    "@capacitor/ios": "^3.0.0",
-    "@capacitor/android": "^3.0.0"
+    "typescript": "^3.2.4"
   },
   "files": [
     "dist/",

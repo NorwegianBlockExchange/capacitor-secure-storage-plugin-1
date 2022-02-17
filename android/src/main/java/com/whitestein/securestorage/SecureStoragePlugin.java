@@ -4,14 +4,13 @@ import android.content.Context;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
-import com.getcapacitor.NativePlugin;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.nio.charset.Charset;
-import java.util.Set;
+import java.util.Optional;
 
 @CapacitorPlugin()
 public class SecureStoragePlugin extends Plugin {
@@ -41,8 +40,9 @@ public class SecureStoragePlugin extends Plugin {
     @PluginMethod()
     public void get(PluginCall call) {
         String key = call.getString("key");
+        Optional<String> biometricPromptText = Optional.ofNullable(call.getString("prompt"));
         try {
-          call.resolve(this._get(key));
+            call.resolve(this._get(key, biometricPromptText));
         } catch (Exception exception) {
             call.reject(exception.getMessage(), exception);
         }
@@ -84,8 +84,8 @@ public class SecureStoragePlugin extends Plugin {
         return ret;
     }
 
-    public JSObject _get(String key) throws Exception {
-        byte[] buffer = this.passwordStorageHelper.getData(key);
+    public JSObject _get(String key, Optional<String> biometricPromptText) throws Exception {
+        byte[] buffer = this.passwordStorageHelper.getData(key, getActivity(), biometricPromptText);
         if (buffer != null && buffer.length > 0) {
             String value = new String(buffer, Charset.forName("UTF-8"));
             JSObject ret = new JSObject();

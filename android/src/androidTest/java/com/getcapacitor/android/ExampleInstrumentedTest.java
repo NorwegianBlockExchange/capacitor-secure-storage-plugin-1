@@ -6,18 +6,14 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import com.getcapacitor.JSObject;
-import com.getcapacitor.MessageHandler;
-import com.getcapacitor.PluginCall;
-import com.whitestein.securestorage.PasswordStorageHelper;
 import com.whitestein.securestorage.SecureStoragePlugin;
 
-import org.json.JSONException;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import java.nio.charset.Charset;
-
 import static org.junit.Assert.*;
+
+import java.util.Optional;
 
 /**
  * Instrumented test, which will execute on an Android device.
@@ -49,7 +45,7 @@ public class ExampleInstrumentedTest {
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
         plugin.loadTextContext(appContext);
         plugin._set("test", "test value");
-        JSObject result = plugin._get("test");
+        JSObject result = plugin._get("test", Optional.empty());
         assertEquals("test value", result.getString("value"));
     }
 
@@ -62,7 +58,8 @@ public class ExampleInstrumentedTest {
         assertTrue(result.getBoolean("value"));
 
         result = plugin._keys();
-        String[] keys = (String[]) result.get("value");
+        com.getcapacitor.JSArray jsonKeys = (com.getcapacitor.JSArray) result.get("value");
+        String[] keys = jsonKeys.toList().toArray(new String[0]);
         assertEquals(1, keys.length);
         assertEquals("test", keys[0]);
     }
@@ -72,7 +69,7 @@ public class ExampleInstrumentedTest {
         SecureStoragePlugin plugin = new SecureStoragePlugin();
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
         plugin.loadTextContext(appContext);
-        plugin._get("test2");
+        plugin._get("test2", Optional.empty());
     }
 
     @Test(expected = Exception.class)
@@ -81,11 +78,11 @@ public class ExampleInstrumentedTest {
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
         plugin.loadTextContext(appContext);
         plugin._set("test", "test value");
-        plugin._get("test");
+        plugin._get("test", Optional.empty());
         JSObject result = plugin._remove("test");
         assertTrue(result.getBoolean("value"));
 
-        plugin._get("test");
+        plugin._get("test", Optional.empty());
     }
 
     @Test(expected = Exception.class)
@@ -96,7 +93,7 @@ public class ExampleInstrumentedTest {
         plugin._set("test", "test value");
         plugin._set("test2", "test value");
         plugin._clear();
-        plugin._get("test");
+        plugin._get("test", Optional.empty());
     }
 
     @Test(expected = Exception.class)
@@ -107,7 +104,7 @@ public class ExampleInstrumentedTest {
         plugin._set("test", "test value");
         plugin._set("test2", "test value");
         plugin._clear();
-        plugin._get("test2");
+        plugin._get("test2", Optional.empty());
     }
 
     @Test
