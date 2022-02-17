@@ -10,10 +10,10 @@
     "build": "npm run clean && tsc",
     "clean": "rimraf ./dist",
     "watch": "tsc --watch",
-    "prepublishOnly": "npm run build",
+    "pre-publish": "npm run build",
     "auth-and-publish": "npx google-artifactregistry-auth --repo-config=./.npmrc && npm publish"
   },
-  "author": "martinkasa",
+  "author": "martinkasa & NBX",
   "license": "MIT",
   "dependencies": {
     "@capacitor/cli": "^3.4.1",
