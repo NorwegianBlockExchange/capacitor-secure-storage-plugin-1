@@ -49,15 +49,15 @@ public class SecureStoragePlugin: CAPPlugin {
         
         let accessControl = getBiometricAccessControl()
         
-//        let context = LAContext()
-//        context.touchIDAuthenticationAllowableReuseDuration = 300 // biometric lifetime of 5 mim
+        let context = LAContext()
+        context.touchIDAuthenticationAllowableReuseDuration = 300 // biometric lifetime of 5 min
 
         // Create a query dict for executing the add to keychain
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
             kSecAttrAccessControl as String: accessControl,
-//            kSecUseAuthenticationContext as String: context,
+            kSecUseAuthenticationContext as String: context,
             kSecValueData as String: encoded
         ]
         
