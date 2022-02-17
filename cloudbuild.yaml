@@ -1,0 +1,21 @@
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    id: "secure-storage-image-build"
+    args: ["build", "-t", "secure-storage", "."]
+  
+#   - name: "gcr.io/cloud-builders/docker"
+#     id: "secure-storage-rollup-build"
+#     args: ["run", "--rm", "-v", "/workspace/opt/build:/opt/build", "secure-storage"]
+  
+  - name: "secure-storage"
+    waitFor: ["secure-storage-image-build"]
+    id: "secure-storage-publish"
+    entrypoint: "/bin/bash"
+    dir: /opt/app
+    args:
+      - "-c"
+      - |
+        yarn pre-publish &&
+        yarn auth-and-publish
+
+timeout: "1600s"
