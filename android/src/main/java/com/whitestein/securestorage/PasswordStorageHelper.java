@@ -11,10 +11,13 @@ import android.security.KeyChain;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyInfo;
 import android.security.keystore.KeyProperties;
+import android.security.keystore.UserNotAuthenticatedException;
 import android.util.Base64;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
+import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.fragment.app.FragmentActivity;
 
@@ -37,6 +40,7 @@ import java.security.spec.InvalidKeySpecException;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -52,6 +56,8 @@ public class PasswordStorageHelper {
     private final PasswordStorage passwordStorage = new PasswordStorageHelper_SDK18();
 
     private final Context context;
+
+    public static final ReentrantLock GLOBAL_BIOMETRICS_LOCK = new ReentrantLock();
 
     public PasswordStorageHelper(Context context) {
         this.context = context;
@@ -98,7 +104,7 @@ public class PasswordStorageHelper {
         void clear();
     }
 
-    private static class PasswordStorageHelper_SDK18 implements PasswordStorage {
+    private static class PasswordStorageHelper_SDK28 implements PasswordStorage {
 
         private static final String KEY_ALGORITHM_RSA = "RSA";
 
@@ -120,7 +126,6 @@ public class PasswordStorageHelper {
             try {
                 ks = KeyStore.getInstance(KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
 
-                //Use null to load Keystore with default parameters.
                 ks.load(null);
 
                 // Check if Private and Public already keys exists. If so we don't need to generate them again
@@ -128,30 +133,37 @@ public class PasswordStorageHelper {
                 if (privateKey != null && ks.getCertificate(alias) != null) {
                     PublicKey publicKey = ks.getCertificate(alias).getPublicKey();
                     if (publicKey != null) {
-                        // All keys are available.
+                        Log.i("SecureStorage", "init: KeyAlreadyPresent");
                         return true;
                     }
                 }
             } catch (Exception ex) {
-                return false;
+                throw new RuntimeException(ex);
             }
 
             AlgorithmParameterSpec spec;
-            if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                // only support devices with Android P or higher
-                throw new IllegalStateException();
-            } else {
-                spec = new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_DECRYPT)
+            if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                spec = new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_DECRYPT | KeyProperties.PURPOSE_ENCRYPT)
                         .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
+                        .setUnlockedDeviceRequired(true)
+                        .setInvalidatedByBiometricEnrollment(false)
                         .setUserAuthenticationRequired(true)
                         .setUserAuthenticationValidityDurationSeconds(300)
+                        .setUserConfirmationRequired(false)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_PKCS1)
+                        .build();
+            } else {
+                spec = new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_DECRYPT | KeyProperties.PURPOSE_ENCRYPT)
+                        .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
                         .setUnlockedDeviceRequired(true)
+                        .setUserAuthenticationRequired(true)
+                        .setUserAuthenticationParameters(300, KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL)
+                        .setInvalidatedByBiometricEnrollment(false)
+                        .setUserConfirmationRequired(false)
                         .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_PKCS1)
                         .build();
             }
 
-            // Initialize a KeyPair generator using the the intended algorithm (in this example, RSA
-            // and the KeyStore. This example uses the AndroidKeyStore.
             KeyPairGenerator kpGenerator;
             try {
                 kpGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM_RSA, KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
@@ -168,7 +180,7 @@ public class PasswordStorageHelper {
                 KeyFactory keyFactory = KeyFactory.getInstance(privateKey.getAlgorithm(), KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
                 KeyInfo keyInfo = keyFactory.getKeySpec(privateKey, KeyInfo.class);
                 boolean isHardwareBackedKeystoreSupported = keyInfo.isInsideSecureHardware();
-                Log.d(LOG_TAG, "Hardware-Backed Keystore Supported: " + isHardwareBackedKeystoreSupported);
+                Log.i(LOG_TAG, "Hardware-Backed Keystore Supported: " + isHardwareBackedKeystoreSupported);
             } catch (KeyStoreException | NoSuchAlgorithmException | UnrecoverableKeyException | InvalidKeySpecException | NoSuchProviderException e) {
                 return false;
             }
@@ -187,7 +199,7 @@ public class PasswordStorageHelper {
                 PublicKey publicKey = ks.getCertificate(alias).getPublicKey();
 
                 if (publicKey == null) {
-                    Log.d(LOG_TAG, "Error: Public key was not found in Keystore");
+                    Log.i(LOG_TAG, "Error: Public key was not found in Keystore");
                     throw new RuntimeException("Error: Public key was not found in Keystore");
                 }
 
@@ -195,7 +207,7 @@ public class PasswordStorageHelper {
 
                 Editor editor = preferences.edit();
                 editor.putString(key, value);
-                editor.commit();
+                editor.apply();
             } catch (NoSuchAlgorithmException | InvalidKeyException | NoSuchPaddingException
                     | IllegalBlockSizeException | BadPaddingException | NoSuchProviderException
                     | InvalidKeySpecException | KeyStoreException | CertificateException | IOException e) {
@@ -203,6 +215,7 @@ public class PasswordStorageHelper {
             }
         }
 
+        @RequiresApi(api = Build.VERSION_CODES.P)
         @Override
         public byte[] getData(String key, FragmentActivity activity) {
             KeyStore ks = null;
@@ -212,8 +225,7 @@ public class PasswordStorageHelper {
                 PrivateKey privateKey = (PrivateKey) ks.getKey(alias, null);
                 return decrypt(privateKey, preferences.getString(key, null), activity);
             } catch (KeyStoreException | NoSuchAlgorithmException | CertificateException | IOException
-                    | UnrecoverableEntryException | InvalidKeyException | NoSuchPaddingException
-                    | IllegalBlockSizeException | BadPaddingException | NoSuchProviderException e) {
+                    | UnrecoverableEntryException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
                 throw new RuntimeException(e);
             }
         }
@@ -273,64 +285,119 @@ public class PasswordStorageHelper {
         }
 
 
-        //TODO only show biometric prompt when the key requires it rather than everytime
-        private static byte[] decrypt(PrivateKey decryptionKey, String encryptedData, FragmentActivity activity) throws NoSuchAlgorithmException,
-                NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException,
-                NoSuchProviderException {
+        @RequiresApi(api = Build.VERSION_CODES.M)
+        private static boolean bioMetricsRequired(PrivateKey decryptionKey) {
+            try {
+                GLOBAL_BIOMETRICS_LOCK.lock();
+                Cipher cipher = Cipher.getInstance(RSA_ECB_PKCS1_PADDING);
+                cipher.init(Cipher.DECRYPT_MODE, decryptionKey);
+            } catch (UserNotAuthenticatedException e) {
+                return true;
+            } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException e) {
+                throw new RuntimeException(e);
+            }finally {
+                GLOBAL_BIOMETRICS_LOCK.unlock();
+            }
+            return false;
+        }
 
-            CompletableFuture<byte[]> future = new CompletableFuture<>();
+        @RequiresApi(api = Build.VERSION_CODES.P)
+        private static CompletableFuture<Boolean> displayBioMetrics(FragmentActivity activity) {
+            CompletableFuture<Boolean> future = new CompletableFuture<>();
+
+
+            BiometricPrompt.PromptInfo promptInfo;
+            if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Biometric Auth")
+                        .setSubtitle("Log in using your biometric credential")
+                        .setDeviceCredentialAllowed(true)
+                        .build();
+            } else {
+                promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Biometric Auth")
+                        .setSubtitle("Log in using your biometric or device credential")
+                        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                        .build();
+            }
+
+            BiometricPrompt prompt = new BiometricPrompt(activity, Executors.newSingleThreadExecutor(), new BiometricPrompt.AuthenticationCallback() {
+                @Override
+                public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                    GLOBAL_BIOMETRICS_LOCK.unlock();
+                    future.completeExceptionally(new RuntimeException(errString.toString()));
+                }
+
+                @Override
+                public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                    GLOBAL_BIOMETRICS_LOCK.unlock();
+                    try {
+                        future.complete(true);
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    }
+                }
+
+                @Override
+                public void onAuthenticationFailed() {
+                    GLOBAL_BIOMETRICS_LOCK.unlock();
+                    future.completeExceptionally(new RuntimeException("failed to authenticate using biometric auth"));
+                }
+            });
+            activity.runOnUiThread(() -> {
+                GLOBAL_BIOMETRICS_LOCK.lock();
+                prompt.authenticate(promptInfo);
+            });
+            return future;
+        }
+
+        @RequiresApi(api = Build.VERSION_CODES.P)
+        private static byte[] decrypt(PrivateKey decryptionKey, String encryptedData, FragmentActivity activity) throws IllegalBlockSizeException, BadPaddingException, InvalidKeyException {
+
+            if (bioMetricsRequired(decryptionKey)) {
+                return displayBioMetrics(activity).thenApply(state -> {
+                    try {
+                        return _decrypt(decryptionKey, encryptedData, activity);
+                    } catch (InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
+                        throw new RuntimeException(e);
+                    }
+                }).join();
+            } else {
+                return _decrypt(decryptionKey, encryptedData, activity);
+            }
+        }
+
+        @RequiresApi(api = Build.VERSION_CODES.N)
+        private static byte[] _decrypt(PrivateKey decryptionKey, String encryptedData, FragmentActivity activity) throws
+                InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
 
             try {
                 if (encryptedData == null)
                     return null;
                 byte[] encryptedBuffer = Base64.decode(encryptedData, Base64.DEFAULT);
-
                 Cipher cipher = Cipher.getInstance(RSA_ECB_PKCS1_PADDING);
                 cipher.init(Cipher.DECRYPT_MODE, decryptionKey);
-
-                BiometricPrompt.PromptInfo promptInfo = new BiometricPrompt.PromptInfo.Builder()
-                        .setTitle("Biometric Auth")
-                        .setSubtitle("Log in using your biometric credential")
-                        .setAllowedAuthenticators(BIOMETRIC_STRONG)
-                        .build();
-
-                BiometricPrompt prompt = new BiometricPrompt(activity, Executors.newSingleThreadExecutor(), new BiometricPrompt.AuthenticationCallback() {
-                    @Override
-                    public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
-                        future.completeExceptionally(new RuntimeException(errString.toString()));
-                    }
-
-                    @Override
-                    public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                if (encryptedBuffer.length <= KEY_LENGTH / 8) {
+                    return (cipher.doFinal(encryptedBuffer));
+                } else {
+                    int limit = KEY_LENGTH / 8;
+                    int position = 0;
+                    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                    while (position < encryptedBuffer.length) {
+                        if (encryptedBuffer.length - position < limit)
+                            limit = encryptedBuffer.length - position;
+                        byte[] tmpData = cipher.doFinal(encryptedBuffer, position, limit);
                         try {
-                            if (encryptedBuffer.length <= KEY_LENGTH / 8) {
-                                future.complete(cipher.doFinal(encryptedBuffer));
-                            } else {
-                                int limit = KEY_LENGTH / 8;
-                                int position = 0;
-                                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                                while (position < encryptedBuffer.length) {
-                                    if (encryptedBuffer.length - position < limit)
-                                        limit = encryptedBuffer.length - position;
-                                    byte[] tmpData = cipher.doFinal(encryptedBuffer, position, limit);
-                                    byteArrayOutputStream.write(tmpData);
-                                    position += limit;
-                                }
-                                future.complete(byteArrayOutputStream.toByteArray());
-                            }
-                        } catch (Exception e) {
-                            future.completeExceptionally(e);
+                            byteArrayOutputStream.write(tmpData);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
                         }
+                        position += limit;
                     }
+                    return (byteArrayOutputStream.toByteArray());
+                }
 
-                    @Override
-                    public void onAuthenticationFailed() {
-                        future.completeExceptionally(new RuntimeException("failed to authenticate using biometric auth"));
-                    }
-                });
-                prompt.authenticate(promptInfo, new BiometricPrompt.CryptoObject(cipher));
-                return future.join();
-            } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException e) {
+            } catch (NoSuchAlgorithmException | NoSuchPaddingException e) {
                 throw new RuntimeException(e);
             }
 

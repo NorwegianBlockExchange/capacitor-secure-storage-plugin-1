@@ -88,8 +88,7 @@ public class SecureStoragePlugin extends Plugin {
     }
 
     public JSObject _get(String key) throws Exception {
-        FragmentActivity a = getActivity();
-        byte[] buffer = this.passwordStorageHelper.getData(key, a);
+        byte[] buffer = this.passwordStorageHelper.getData(key, getActivity());
         if (buffer != null && buffer.length > 0) {
             String value = new String(buffer, Charset.forName("UTF-8"));
             JSObject ret = new JSObject();
