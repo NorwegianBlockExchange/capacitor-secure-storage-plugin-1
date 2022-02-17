@@ -3,12 +3,12 @@ steps:
     id: "secure-storage-image-build"
     args: ["build", "-t", "secure-storage", "."]
   
-  - name: "gcr.io/cloud-builders/docker"
-    id: "secure-storage-rollup-build"
-    args: ["run", "--rm", "-v", "/workspace/opt/build:/opt/build", "secure-storage"]
+#   - name: "gcr.io/cloud-builders/docker"
+#     id: "secure-storage-rollup-build"
+#     args: ["run", "--rm", "-v", "/workspace/opt/build:/opt/build", "secure-storage"]
   
-  - name: "secure-storaage"
-    waitFor: ["secure-storage-image", "secure-storager-rollup-build"]
+  - name: "secure-storage"
+    waitFor: ["secure-storage-image-build"]
     id: "secure-storage-publish"
     entrypoint: "/bin/bash"
     dir: /opt/app
