@@ -7,7 +7,7 @@ steps:
 #     id: "secure-storage-rollup-build"
 #     args: ["run", "--rm", "-v", "/workspace/opt/build:/opt/build", "secure-storage"]
   
-  - name: "secure-storaage"
+  - name: "secure-storage"
     waitFor: ["secure-storage-image-build"]
     id: "secure-storage-publish"
     entrypoint: "/bin/bash"
